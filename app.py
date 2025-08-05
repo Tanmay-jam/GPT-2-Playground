@@ -3,7 +3,7 @@ import torch.nn as nn
 import streamlit as st
 import tiktoken
 import matplotlib.pyplot as plt
-
+from huggingface_hub import hf_hub_download
 from blocks import LayerNorm, TransformerBlock
 
 st.set_page_config(layout="wide")
@@ -239,5 +239,6 @@ if st.session_state.start_ids is not None:
                 ax2.set_ylabel("Probability")
                 ax2.set_title(f"Top-{st.session_state.top_k} Tokens with Temperature Scaling (T={temperature})")
                 st.pyplot(fig2)
+
 
 
