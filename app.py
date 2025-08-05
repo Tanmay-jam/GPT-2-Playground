@@ -100,7 +100,7 @@ if 'use_temperature' not in st.session_state:
 if 'masked_ids' not in st.session_state:
     st.session_state.masked_ids = []
 if 'user_input' not in st.session_state:
-    st.session_state.user_input = "Every effort moves you"
+    st.session_state.user_input = "The mesmerizing north light is"
 
 # Text input
 text = st.text_area("Enter text input:", st.session_state.user_input)
@@ -239,6 +239,7 @@ if st.session_state.start_ids is not None:
                 ax2.set_ylabel("Probability")
                 ax2.set_title(f"Top-{st.session_state.top_k} Tokens with Temperature Scaling (T={temperature})")
                 st.pyplot(fig2)
+
 
 
 
