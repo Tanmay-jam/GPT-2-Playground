@@ -82,7 +82,7 @@ CFG = GPT_CONFIG_124M = {
     "drop_rate": 0.1,
     "qkv_bias": True
 }
-model = load_model(CFG, WEIGHTS_PATH)
+model = load_model(CFG)
 
 # Initialize session state
 if 'generated_ids' not in st.session_state:
@@ -239,4 +239,5 @@ if st.session_state.start_ids is not None:
                 ax2.set_ylabel("Probability")
                 ax2.set_title(f"Top-{st.session_state.top_k} Tokens with Temperature Scaling (T={temperature})")
                 st.pyplot(fig2)
+
 
