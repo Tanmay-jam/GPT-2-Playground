@@ -7,3 +7,4 @@ typing_extensions>=4.0
 protobuf>=3.20
 requests>=2.0.0
 watchdog>=2.1.9
+huggingface_hub
