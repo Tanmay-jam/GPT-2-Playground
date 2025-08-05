@@ -55,8 +55,14 @@ def load_tokenizer(model_name: str = 'gpt2'):
     return tiktoken.get_encoding('gpt2')
 
 @st.cache_resource
-def load_model(cfg, weights_path: str):
+def load_model(cfg):
     model = GPTModel(cfg)
+    weights_path = hf_hub_download(
+        repo_id="taanmaay/GPT-2-124M-weights",
+        filename="gpt_pytorch_weights.pth",
+        repo_type="model"
+    )
+    
     state = torch.load(weights_path, map_location='cpu')
     model.load_state_dict(state)
     model.eval()
@@ -76,7 +82,6 @@ CFG = GPT_CONFIG_124M = {
     "drop_rate": 0.1,
     "qkv_bias": True
 }
-WEIGHTS_PATH = 'D:\\IIT Patna\\Project_LFS\\gpt_pytorch_weights.pth'
 model = load_model(CFG, WEIGHTS_PATH)
 
 # Initialize session state
@@ -234,3 +239,4 @@ if st.session_state.start_ids is not None:
                 ax2.set_ylabel("Probability")
                 ax2.set_title(f"Top-{st.session_state.top_k} Tokens with Temperature Scaling (T={temperature})")
                 st.pyplot(fig2)
+
