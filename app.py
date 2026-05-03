@@ -1,9 +1,10 @@
+import time
 import torch
 import streamlit as st
 import tiktoken
 import plotly.graph_objects as go
 from model import load_model
-from config import GPT_CONFIG_124M, MAX_GEN_TOKENS
+from config import GPT_CONFIG_124M
 from sampling import sample_next_token, get_filtered_probs
 
 st.set_page_config(page_title="GPT-2 Playground", page_icon="🤖", layout="wide")
@@ -25,6 +26,8 @@ model = get_model(GPT_CONFIG_124M)
 # ------ Session state ------
 defaults = {
     'generated_ids': [],
+    'generated_probs': [],
+    'generated_entropies': [],
     'start_ids': None,
     'internals': None,
     'top_k': 5,
@@ -36,6 +39,7 @@ defaults = {
     'masked_ids': [],
     'user_input': "The mesmerizing north light is",
     'last_token': None,
+    'max_gen_tokens': 50,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -51,6 +55,8 @@ with tab_gen:
         st.session_state.user_input = text
         st.session_state.start_ids = None
         st.session_state.generated_ids = []
+        st.session_state.generated_probs = []
+        st.session_state.generated_entropies = []
         st.session_state.internals = None
         st.session_state.masked_ids = []
         st.session_state.last_token = None
@@ -60,6 +66,75 @@ with tab_gen:
         ids = tokenizer.encode(st.session_state.user_input)
         st.session_state.start_ids = torch.tensor(ids).unsqueeze(0)
         st.session_state.masked_ids = [False] * len(ids)
+
+    EOS_TOKEN_ID = 50256
+
+    def run_one_step():
+        masked_input = st.session_state.start_ids.clone()
+        for i, masked in enumerate(st.session_state.masked_ids):
+            if masked:
+                masked_input[0, i] = tokenizer.encode("[...]")[0]
+        if st.session_state.generated_ids:
+            prev = torch.tensor(st.session_state.generated_ids, dtype=torch.long).unsqueeze(0)
+            masked_input = torch.cat([masked_input, prev], dim=1)
+        with torch.no_grad():
+            internals = model.forward_with_internals(masked_input)
+        st.session_state.internals = internals
+        next_token_id = sample_next_token(
+            logits=internals['logits'][0, -1],
+            mode=st.session_state.sampling_mode,
+            top_k=st.session_state.top_k,
+            top_p=st.session_state.top_p,
+            min_p=st.session_state.min_p,
+            temperature=st.session_state.temperature,
+            use_temperature=st.session_state.use_temperature
+        )
+        st.session_state.generated_ids.append(next_token_id)
+        st.session_state.last_token = tokenizer.decode([next_token_id])
+        raw_probs = torch.softmax(internals['logits'][0, -1], dim=-1)
+        st.session_state.generated_probs.append(raw_probs[next_token_id].item())
+
+        entropy = -(raw_probs * torch.log(raw_probs + 1e-10)).sum().item()
+        st.session_state.generated_entropies.append(entropy)
+
+        return next_token_id
+
+    def make_chart_fig(internals, last_token_id):
+        logits = internals['logits'][0, -1]
+        indices, probs = get_filtered_probs(
+            logits=logits,
+            mode=st.session_state.sampling_mode,
+            top_k=st.session_state.top_k,
+            top_p=st.session_state.top_p,
+            min_p=st.session_state.min_p,
+            temperature=st.session_state.temperature if st.session_state.use_temperature else 1.0
+        )
+        labels = [
+            tokenizer.decode([int(i)]).replace('\n', '\\n').strip() or f"[{int(i)}]"
+            for i in indices
+        ]
+        labels = [l[:15] for l in labels]
+        colors = [
+            '#2ecc71' if (last_token_id is not None and int(idx) == last_token_id) else '#4C9BE8'
+            for idx in indices
+        ]
+        fig = go.Figure(go.Bar(
+            x=probs.tolist(), y=labels, orientation='h',
+            text=[f"{v:.3f}" for v in probs.tolist()],
+            textposition='outside',
+            marker_color=colors,
+            hovertemplate="<b>%{y}</b><br>Token ID: %{customdata}<br>Prob: %{x:.4f}<extra></extra>",
+            customdata=[int(i) for i in indices],
+        ))
+        fig.update_layout(
+            xaxis_title="Probability",
+            yaxis=dict(autorange='reversed'),
+            height=max(250, len(indices) * 24),
+            margin=dict(l=10, r=70, t=20, b=30),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+        )
+        return fig
 
     col_left, col_right = st.columns([3, 2])
 
@@ -75,7 +150,6 @@ with tab_gen:
                             f"'{tok}'", value=st.session_state.masked_ids[i], key=f"mask_{i}"
                         )
 
-        # Build and display token sequence
         if st.session_state.start_ids is not None:
             full_ids = st.session_state.start_ids.clone()
             if st.session_state.generated_ids:
@@ -89,14 +163,18 @@ with tab_gen:
             st.write("**Tokens:** " + input_part + (" → " + gen_part if gen_part else ""))
 
         st.subheader("Generated Text")
-        if st.session_state.start_ids is not None:
-            full_text = tokenizer.decode(full_ids.squeeze(0).tolist())
-        else:
-            full_text = st.session_state.user_input
-        st.text_area("", full_text, height=150, label_visibility="collapsed")
+        text_ph = st.empty()
+        full_text = tokenizer.decode(full_ids.squeeze(0).tolist()) if st.session_state.start_ids is not None else st.session_state.user_input
+        text_ph.text_area("", full_text, height=150, label_visibility="collapsed")
 
         if st.session_state.last_token:
             st.success(f"Last generated token: `{st.session_state.last_token}`")
+
+        st.subheader("Sampling Distribution")
+        chart_ph = st.empty()
+        if st.session_state.internals is not None:
+            last_token_id = st.session_state.generated_ids[-1] if st.session_state.generated_ids else None
+            chart_ph.plotly_chart(make_chart_fig(st.session_state.internals, last_token_id), use_container_width=True)
 
     with col_right:
         st.subheader("Sampling Controls")
@@ -120,113 +198,144 @@ with tab_gen:
                 value=st.session_state.temperature, step=0.1
             )
 
+        st.session_state.max_gen_tokens = st.slider(
+            "Max tokens to generate", min_value=10, max_value=200,
+            value=st.session_state.max_gen_tokens, step=10
+        )
+
         st.divider()
 
-        col_btn1, col_btn2 = st.columns(2)
+        col_btn1, col_btn2, col_btn3 = st.columns(3)
         with col_btn1:
             generate = st.button("Generate ▶", type="primary", use_container_width=True)
         with col_btn2:
+            auto_generate = st.button("Auto Generate ⚡", use_container_width=True)
+        with col_btn3:
             restart = st.button("Restart", use_container_width=True)
 
         if restart:
-            for key in ['generated_ids', 'internals', 'start_ids', 'masked_ids', 'last_token']:
-                st.session_state[key] = [] if key in ('generated_ids', 'masked_ids') else None
+            for key in ['generated_ids', 'generated_probs', 'generated_entropies', 'internals', 'start_ids', 'masked_ids', 'last_token']:
+                st.session_state[key] = [] if key in ('generated_ids', 'generated_probs', 'generated_entropies', 'masked_ids') else None
             st.rerun()
 
         if generate and st.session_state.start_ids is not None:
-            if len(st.session_state.generated_ids) < MAX_GEN_TOKENS:
-                masked_input = st.session_state.start_ids.clone()
-                for i, masked in enumerate(st.session_state.masked_ids):
-                    if masked:
-                        masked_input[0, i] = tokenizer.encode("[...]")[0]
-                if st.session_state.generated_ids:
-                    prev = torch.tensor(st.session_state.generated_ids, dtype=torch.long).unsqueeze(0)
-                    masked_input = torch.cat([masked_input, prev], dim=1)
-
-                with torch.no_grad():
-                    internals = model.forward_with_internals(masked_input)
-                st.session_state.internals = internals
-
-                next_token_id = sample_next_token(
-                    logits=internals['logits'][0, -1],
-                    mode=st.session_state.sampling_mode,
-                    top_k=st.session_state.top_k,
-                    top_p=st.session_state.top_p,
-                    min_p=st.session_state.min_p,
-                    temperature=st.session_state.temperature,
-                    use_temperature=st.session_state.use_temperature
-                )
-                st.session_state.generated_ids.append(next_token_id)
-                st.session_state.last_token = tokenizer.decode([next_token_id])
+            if len(st.session_state.generated_ids) < st.session_state.max_gen_tokens:
+                run_one_step()
                 st.rerun()
             else:
-                st.warning(f"Reached {MAX_GEN_TOKENS} token limit. Click Restart.")
+                st.warning(f"Reached {st.session_state.max_gen_tokens} token limit. Click Restart.")
+
+    # Auto-generate loop — runs after both columns so it can update col_left placeholders
+    if auto_generate and st.session_state.start_ids is not None:
+        remaining = st.session_state.max_gen_tokens - len(st.session_state.generated_ids)
+        for _ in range(remaining):
+            next_token_id = run_one_step()
+            current_ids = st.session_state.start_ids.clone()
+            if st.session_state.generated_ids:
+                current_ids = torch.cat(
+                    [current_ids, torch.tensor(st.session_state.generated_ids).unsqueeze(0)], dim=1
+                )
+            text_ph.text_area("", tokenizer.decode(current_ids.squeeze(0).tolist()),
+                              height=150, label_visibility="collapsed")
+            last_id = st.session_state.generated_ids[-1]
+            chart_ph.plotly_chart(make_chart_fig(st.session_state.internals, last_id), use_container_width=True)
+            if next_token_id == EOS_TOKEN_ID:
+                break
+            time.sleep(1.0)
+        st.rerun()
 
 # ==================== Visualizations Tab ====================
 with tab_viz:
     if st.session_state.internals is None:
-        st.info("Generate at least one token to see probability distributions.")
+        st.info("Generate at least one token to see visualizations.")
     else:
-        logits = st.session_state.internals['logits'][0, -1]
-        mode = st.session_state.sampling_mode
-        temperature = st.session_state.temperature
+        internals = st.session_state.internals
 
-        def make_prob_chart(indices, probs, title, color):
-            labels = [
-                tokenizer.decode([int(i)]).replace('\n', '\\n').strip() or f"[{int(i)}]"
-                for i in indices
+        # ── Token Confidence History ──────────────────────────────────────────
+        st.subheader("Token Confidence History")
+        st.caption("Raw softmax probability assigned to each chosen token at generation time — shows where the model was confident vs. uncertain.")
+
+        if st.session_state.generated_ids:
+            gen_tokens = [
+                tokenizer.decode([tid]).replace('\n', '\\n').strip() or f"[{tid}]"
+                for tid in st.session_state.generated_ids
             ]
-            labels = [l[:15] for l in labels]
-            token_ids = [int(i) for i in indices]
-            p = probs.tolist()
+            gen_tokens = [t[:12] for t in gen_tokens]
+            probs_history = st.session_state.generated_probs
+            mean_prob = sum(probs_history) / len(probs_history)
 
-            fig = go.Figure(go.Bar(
-                x=p,
-                y=labels,
-                orientation='h',
-                text=[f"{v:.3f}" for v in p],
+            fig_hist = go.Figure()
+            fig_hist.add_trace(go.Bar(
+                x=list(range(len(gen_tokens))),
+                y=probs_history,
+                text=[f"{p:.3f}" for p in probs_history],
                 textposition='outside',
-                marker_color=color,
-                hovertemplate="<b>%{y}</b><br>Token ID: %{customdata}<br>Prob: %{x:.4f}<extra></extra>",
-                customdata=token_ids,
+                marker_color=[
+                    '#2ecc71' if p >= mean_prob else '#E8854C'
+                    for p in probs_history
+                ],
+                hovertemplate="<b>%{customdata}</b><br>Step: %{x}<br>Prob: %{y:.4f}<extra></extra>",
+                customdata=gen_tokens,
             ))
-            fig.update_layout(
-                title=title,
-                xaxis_title="Probability",
-                yaxis=dict(autorange='reversed'),
-                height=max(350, len(indices) * 28),
-                margin=dict(l=10, r=80, t=50, b=40),
+            fig_hist.add_hline(
+                y=mean_prob, line_dash="dash", line_color="rgba(255,255,255,0.4)",
+                annotation_text=f"mean {mean_prob:.3f}", annotation_position="top right"
+            )
+            fig_hist.update_layout(
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=list(range(len(gen_tokens))),
+                    ticktext=gen_tokens,
+                    tickangle=-45,
+                ),
+                yaxis_title="Probability",
+                height=320,
+                margin=dict(l=10, r=20, t=20, b=80),
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
             )
-            return fig
+            st.plotly_chart(fig_hist, use_container_width=True)
+        else:
+            st.info("Generate some tokens to see confidence history.")
 
-        col_v1, col_v2 = st.columns(2)
+        st.divider()
 
-        with col_v1:
-            indices, probs = get_filtered_probs(
-                logits=logits, mode=mode,
-                top_k=st.session_state.top_k,
-                top_p=st.session_state.top_p,
-                min_p=st.session_state.min_p,
-                temperature=temperature if st.session_state.use_temperature else 1.0
-            )
-            st.metric("Tokens in sampling pool", len(indices))
-            st.plotly_chart(
-                make_prob_chart(indices, probs, f"Sampling pool — {mode}", '#4C9BE8'),
-                use_container_width=True
-            )
+        # ── Entropy per Step ──────────────────────────────────────────────────
+        st.subheader("Entropy per Step")
+        st.caption("Shannon entropy of the full token distribution at each generation step (nats). High entropy = many plausible next tokens. Low entropy = model was confident.")
 
-        with col_v2:
-            indices2, probs2 = get_filtered_probs(
-                logits=logits, mode=mode,
-                top_k=st.session_state.top_k,
-                top_p=st.session_state.top_p,
-                min_p=st.session_state.min_p,
-                temperature=temperature
+        if st.session_state.generated_entropies:
+            entropies = st.session_state.generated_entropies
+            mean_ent = sum(entropies) / len(entropies)
+            step_labels = [
+                tokenizer.decode([tid]).replace('\n', '\\n').strip() or f"[{tid}]"
+                for tid in st.session_state.generated_ids
+            ]
+            step_labels = [t[:10] for t in step_labels]
+
+            fig_ent = go.Figure(go.Bar(
+                x=list(range(len(entropies))),
+                y=entropies,
+                marker_color=[
+                    '#E8854C' if e >= mean_ent else '#4C9BE8'
+                    for e in entropies
+                ],
+                text=[f"{e:.2f}" for e in entropies],
+                textposition='outside',
+                hovertemplate="<b>%{customdata}</b><br>Step %{x}<br>Entropy: %{y:.3f} nats<extra></extra>",
+                customdata=step_labels,
+            ))
+            fig_ent.add_hline(
+                y=mean_ent, line_dash="dash", line_color="rgba(255,255,255,0.4)",
+                annotation_text=f"mean {mean_ent:.2f}", annotation_position="top right"
             )
-            st.metric("Tokens in pool with Temperature", len(indices2))
-            st.plotly_chart(
-                make_prob_chart(indices2, probs2, f"With Temperature T={temperature}", '#E8854C'),
-                use_container_width=True
+            fig_ent.update_layout(
+                xaxis=dict(tickmode='array', tickvals=list(range(len(step_labels))), ticktext=step_labels, tickangle=-45),
+                yaxis_title="Entropy (nats)",
+                height=300,
+                margin=dict(l=10, r=20, t=20, b=80),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
             )
+            st.plotly_chart(fig_ent, use_container_width=True)
+

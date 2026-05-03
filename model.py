@@ -17,6 +17,15 @@ class GPTModel(nn.Module):
         self.final_norm = LayerNorm(cfg["emb_dim"])
         self.out_head = nn.Linear(cfg["emb_dim"], cfg["vocab_size"], bias=False)
 
+    def get_logits(self, in_idx):
+        batch_size, seq_len = in_idx.shape
+        tok_embeds = self.tok_emb(in_idx)
+        positions = torch.arange(seq_len, device=in_idx.device).unsqueeze(0)
+        x = self.drop_emb(tok_embeds + self.pos_emb(positions))
+        for block in self.trf_blocks:
+            x = block(x)
+        return self.out_head(self.final_norm(x))
+
     def forward_with_internals(self, in_idx):
         batch_size, seq_len = in_idx.shape
         tok_embeds = self.tok_emb(in_idx)
@@ -44,6 +53,27 @@ class GPTModel(nn.Module):
         internals['logits'] = logits.detach().cpu()
 
         return internals
+
+
+class DraftGPTModel(nn.Module):
+    """GPT-2 with only the first n_layers transformer blocks — shares weights with the full model."""
+    def __init__(self, full_model, n_layers):
+        super().__init__()
+        self.tok_emb = full_model.tok_emb
+        self.pos_emb = full_model.pos_emb
+        self.drop_emb = full_model.drop_emb
+        self.trf_blocks = full_model.trf_blocks[:n_layers]
+        self.final_norm = full_model.final_norm
+        self.out_head = full_model.out_head
+
+    def get_logits(self, in_idx):
+        batch_size, seq_len = in_idx.shape
+        tok_embeds = self.tok_emb(in_idx)
+        positions = torch.arange(seq_len, device=in_idx.device).unsqueeze(0)
+        x = self.drop_emb(tok_embeds + self.pos_emb(positions))
+        for block in self.trf_blocks:
+            x = block(x)
+        return self.out_head(self.final_norm(x))
 
 
 def load_model(cfg):
