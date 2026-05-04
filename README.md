@@ -23,6 +23,10 @@ pinned: false
 
 ---
 
+![GPT-2 Playground walkthrough](assets/basicwalkthrough.gif)
+
+---
+
 ## What it does
 
 Watch GPT-2 generate text one token at a time. Control every aspect of sampling, observe the probability distribution update live, and understand why the model picks each token.
