@@ -23,7 +23,7 @@ pinned: false
 
 ---
 
-![GPT-2 Playground walkthrough](assets/basicwalkthrough.gif)
+![GPT-2 Playground walkthrough](https://raw.githubusercontent.com/Tanmay-jam/GPT-2-Playground/main/assets/basicwalkthrough.gif)
 
 ---
 
