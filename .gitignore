@@ -3,3 +3,5 @@ Documents/
 __pycache__/
 *.pth
 =5.0
+assets/
+deploy_to_space.ps1
