@@ -17,7 +17,7 @@ hf_hub_download( \
 
 # Copy application code
 COPY app.py blocks.py model.py sampling.py config.py ./
-COPY pages/constrained_decoding.py pages/
+COPY pages/home.py pages/next_token_generation.py pages/constrained_decoding.py pages/
 COPY .streamlit/ .streamlit/
 
 EXPOSE 7860
