@@ -6,7 +6,6 @@ import plotly.graph_objects as go
 from model import load_model
 from config import GPT_CONFIG_124M
 
-st.set_page_config(page_title="Constrained Decoding", page_icon="🔒", layout="wide")
 st.title("🔒 Constrained Decoding")
 st.caption("Restricting token sampling to a chosen subset — showing how structure can be enforced at the decoding level")
 
@@ -22,9 +21,6 @@ with st.expander("How it works", expanded=True):
 
 This is entirely a **decoding-level** technique — no retraining required, works on any model.
 
-> **Why GPT-2?** GPT-2 wasn't trained to follow structured output instructions.
-> It will produce plausible text within the allowed token set, but won't understand intent like "produce valid JSON."
-> That gap is the point — it separates *constrained decoding* (mechanical) from *instruction following* (learned).
 """)
 
 # ── Resources ─────────────────────────────────────────────────────────────────
