@@ -11,7 +11,7 @@ pinned: false
 <h1 align="center">GPT-2 Playground</h1>
 
 <p align="center">
-  Step-by-step autoregressive text generation with GPT-2 124M — built from scratch in PyTorch.
+  An interactive tool for understanding how language models generate text — built from scratch in PyTorch.
 </p>
 
 <p align="center">
@@ -27,22 +27,22 @@ pinned: false
 
 ---
 
-## What it does
+## Pages
 
-Watch GPT-2 generate text one token at a time. Control every aspect of sampling, observe the probability distribution update live, and understand why the model picks each token.
+### 🤖 Next Token Generation
+Watch GPT-2 generate text one token at a time. Control every aspect of sampling and observe the probability distribution update live.
 
-## Features
-
-**Generate tab**
-- Generate tokens one at a time or auto-generate the full sequence with live chart updates
-- Three sampling modes: **Top-K**, **Top-P (nucleus)**, **Min-P**
-- Temperature scaling toggle
+- Generate step-by-step or auto-generate with live chart updates
+- Three sampling modes: **Top-K**, **Top-P (nucleus)**, **Min-P** with temperature scaling
 - Mask any input token to see how context shapes predictions
+- **Visualizations tab:** token confidence history and entropy per step across the full generation sequence
 
-**Visualizations tab**
-- **Sampling distribution** — probability bar chart for the current sampling pool, chosen token highlighted
-- **Token confidence history** — raw softmax probability of each chosen token over the generation sequence
-- **Entropy per step** — Shannon entropy of the full distribution at each step; reveals where the model was uncertain
+### 🔒 Constrained Decoding
+Restrict the token pool to a chosen subset and see how it reshapes the probability distribution at each step.
+
+- Four constraint modes: digits only, alphabetic only, custom vocabulary, forbidden words
+- Side-by-side charts: full distribution (forbidden tokens greyed out) vs constrained distribution (renormalized)
+- Demonstrates that constrained decoding is a decoding-level technique — no retraining required
 
 ## Architecture
 
@@ -54,7 +54,8 @@ No HuggingFace `transformers`. Every component is implemented from scratch.
 | `model.py` | `GPTModel`, `forward_with_internals` |
 | `sampling.py` | `sample_next_token`, `get_filtered_probs` — top-k / top-p / min-p |
 | `config.py` | `GPT_CONFIG_124M` |
-| `app.py` | Streamlit UI |
+| `app.py` | Multipage router (`st.navigation`) |
+| `pages/` | One file per page |
 
 GPT-2 124M weights are downloaded from [taanmaay/GPT-2-124M-weights](https://huggingface.co/taanmaay/GPT-2-124M-weights) at Docker build time.
 
